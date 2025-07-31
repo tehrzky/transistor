@@ -10,9 +10,22 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-    - name: Checkout Transistor code
+    - name: Checkout your repo
+      uses: actions/checkout@v4
+      
+    - name: Download original Transistor code
       run: |
-        git clone https://codeberg.org/y20k/transistor.git .
+        # Download and merge with original code
+        git clone https://codeberg.org/y20k/transistor.git temp_transistor
+        
+        # Copy original files but keep our custom files
+        cp -r temp_transistor/* . || true
+        
+        # Ensure our custom files override
+        cp -f app/src/main/AndroidManifest.xml app/src/main/AndroidManifest.xml || true
+        
+        # Clean up
+        rm -rf temp_transistor
         
     - name: Set up JDK 17
       uses: actions/setup-java@v4
