@@ -2,7 +2,7 @@ name: Build APK with Google Drive Sync
 
 on:
   push:
-    branches: [ master, main ]
+    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
@@ -10,22 +10,37 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-    - name: Checkout your repo
+    - name: Checkout repository
       uses: actions/checkout@v4
       
-    - name: Download original Transistor code
+    - name: Download original Transistor source
       run: |
-        # Download and merge with original code
-        git clone https://codeberg.org/y20k/transistor.git temp_transistor
+        # Clone original Transistor app
+        git clone https://codeberg.org/y20k/transistor.git original
         
-        # Copy original files but keep our custom files
-        cp -r temp_transistor/* . || true
+        # Copy all original files
+        cp -r original/* .
         
-        # Ensure our custom files override
-        cp -f app/src/main/AndroidManifest.xml app/src/main/AndroidManifest.xml || true
+        # Override with our custom files (manifest + sync files)
+        if [ -f "app/src/main/AndroidManifest.xml" ]; then
+          cp app/src/main/AndroidManifest.xml original/app/src/main/AndroidManifest.xml
+        fi
         
-        # Clean up
-        rm -rf temp_transistor
+        # Copy our sync files if they exist
+        if [ -d "app/src/main/java/org/y20k/transistor/sync/" ]; then
+          mkdir -p original/app/src/main/java/org/y20k/transistor/sync/
+          cp -r app/src/main/java/org/y20k/transistor/sync/* original/app/src/main/java/org/y20k/transistor/sync/
+        fi
+        
+        if [ -d "app/src/main/java/org/y20k/transistor/ui/" ]; then
+          mkdir -p original/app/src/main/java/org/y20k/transistor/ui/
+          cp -r app/src/main/java/org/y20k/transistor/ui/* original/app/src/main/java/org/y20k/transistor/ui/
+        fi
+        
+        # Use the combined version
+        rm -rf app
+        mv original app
+        cp -r app/* .
         
     - name: Set up JDK 17
       uses: actions/setup-java@v4
@@ -38,24 +53,25 @@ jobs:
 
     - name: Add Google Drive dependencies
       run: |
-        cat >> app/build.gradle << 'EOF'
-        
-        dependencies {
-            implementation 'com.google.apis:google-api-services-drive:v3-rev20220815-2.0.0'
-            implementation 'com.google.api-client:google-api-client-android:1.23.0'
-            implementation 'com.google.oauth-client:google-oauth-client-jetty:1.23.0'
-            implementation 'com.google.android.gms:play-services-auth:20.7.0'
-            implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
-            implementation 'com.google.code.gson:gson:2.10.1'
-            implementation 'androidx.work:work-runtime-ktx:2.9.0'
-        }
-        EOF
+        echo "" >> app/build.gradle
+        echo "dependencies {" >> app/build.gradle
+        echo "    implementation 'com.google.apis:google-api-services-drive:v3-rev20220815-2.0.0'" >> app/build.gradle
+        echo "    implementation 'com.google.api-client:google-api-client-android:1.23.0'" >> app/build.gradle
+        echo "    implementation 'com.google.oauth-client:google-oauth-client-jetty:1.23.0'" >> app/build.gradle
+        echo "    implementation 'com.google.android.gms:play-services-auth:20.7.0'" >> app/build.gradle
+        echo "    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'" >> app/build.gradle
+        echo "    implementation 'com.google.code.gson:gson:2.10.1'" >> app/build.gradle
+        echo "    implementation 'androidx.work:work-runtime-ktx:2.9.0'" >> app/build.gradle
+        echo "}" >> app/build.gradle
         
     - name: Make gradlew executable
       run: chmod +x ./gradlew
       
+    - name: Clean project
+      run: ./gradlew clean
+      
     - name: Build debug APK
-      run: ./gradlew assembleDebug --stacktrace
+      run: ./gradlew assembleDebug
       
     - name: Upload APK
       uses: actions/upload-artifact@v4
