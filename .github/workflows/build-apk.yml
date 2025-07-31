@@ -1,4 +1,4 @@
-name: Build Transistor APK
+name: Build Transistor with Google Drive Sync
 
 on:
   workflow_dispatch:
@@ -23,31 +23,24 @@ jobs:
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
       
-    - name: Cache Gradle packages
-      uses: actions/cache@v3
-      with:
-        path: |
-          ~/.gradle/caches
-          ~/.gradle/wrapper
-        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-        restore-keys: |
-          ${{ runner.os }}-gradle-
-          
-    - name: Make gradlew executable
-      run: chmod +x ./gradlew
-      
-    - name: Clean project
-      run: ./gradlew clean --stacktrace
-      
-    - name: Build debug APK
-      run: ./gradlew assembleDebug --stacktrace --info
-      
-    - name: List APK files (debug)
-      run: find . -name "*.apk" -type f
-      
-    - name: Upload APK
-      uses: actions/upload-artifact@v4
-      with:
-        name: transistor-apk
-        path: app/build/outputs/apk/debug/*.apk
-        if-no-files-found: error
+    - name: Add Google Drive sync permissions
+      run: |
+        # Add Google Drive permission to AndroidManifest.xml
+        sed -i '/<uses-permission android:name="android.permission.WAKE_LOCK" \/>/a\    <uses-permission android:name="android.permission.GET_ACCOUNTS" \/>' app/src/main/AndroidManifest.xml
+        
+        # Add sync settings activity to manifest
+        sed -i '/<\/application>/i\        <activity\n            android:name="org.y20k.transistor.ui.SyncSettingsActivity"\n            android:label="Google Drive Sync"\n            android:exported="false" \/>' app/src/main/AndroidManifest.xml
+        
+    - name: Add Google Drive dependencies
+      run: |
+        # Add Google Drive dependencies to build.gradle
+        sed -i '/implementation.*androidx.work:work-runtime-ktx/a\    implementation '\''com.google.apis:google-api-services-drive:v3-rev20220815-2.0.0'\''\n    implementation '\''com.google.api-client:google-api-client-android:1.23.0'\''\n    implementation '\''com.google.oauth-client:google-oauth-client-jetty:1.23.0'\''\n    implementation '\''com.google.android.gms:play-services-auth:20.7.0'\''\n    implementation '\''com.google.code.gson:gson:2.10.1'\''' app/build.gradle
+        
+    - name: Create sync directory
+      run: |
+        mkdir -p app/src/main/java/org/y20k/transistor/sync
+        mkdir -p app/src/main/java/org/y20k/transistor/ui
+        
+    - name: Add Google Drive Sync Service
+      run: |
+        cat > app/src/main/java/org/y20k/transistor/sync/GoogleDriveSyncService.kt << 'EOF'
