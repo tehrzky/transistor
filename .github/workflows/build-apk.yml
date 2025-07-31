@@ -1,47 +1,18 @@
-name: Build APK with Google Drive Sync
+name: Build Transistor APK
 
 on:
+  workflow_dispatch:
   push:
     branches: [ main, master ]
-  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      
-    - name: Download and setup Transistor source
+    - name: Checkout original Transistor
       run: |
-        # Clone original Transistor app
-        git clone https://codeberg.org/y20k/transistor.git temp_source
-        
-        # Remove our incomplete files and use original structure
-        rm -rf app build.gradle settings.gradle gradle.properties gradlew gradlew.bat gradle/
-        
-        # Copy the complete original project
-        cp -r temp_source/* .
-        
-        # Now override ONLY our custom files
-        mkdir -p app/src/main/java/org/y20k/transistor/sync/
-        mkdir -p app/src/main/java/org/y20k/transistor/ui/
-        
-        # Clean up
-        rm -rf temp_source
-        
-    - name: Override with our custom files
-      run: |
-        # Copy our custom AndroidManifest.xml if it exists in our repo
-        if [ -f "temp_custom_files/app/src/main/AndroidManifest.xml" ]; then
-          echo "Custom manifest found, but using original for now"
-        fi
-        
-    - name: Add sync permissions to manifest
-      run: |
-        # Add Google Drive permissions to the existing manifest
-        sed -i '/<uses-permission android:name="android.permission.WAKE_LOCK" \/>/a\    <uses-permission android:name="android.permission.GET_ACCOUNTS" \/>' app/src/main/AndroidManifest.xml
+        git clone https://codeberg.org/y20k/transistor.git .
         
     - name: Set up JDK 17
       uses: actions/setup-java@v4
@@ -51,104 +22,32 @@ jobs:
         
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
-
-    - name: Add Google Drive dependencies
-      run: |
-        # Add dependencies to existing build.gradle
-        sed -i '/dependencies {/a\    implementation '\''com.google.apis:google-api-services-drive:v3-rev20220815-2.0.0'\''\n    implementation '\''com.google.api-client:google-api-client-android:1.23.0'\''\n    implementation '\''com.google.oauth-client:google-oauth-client-jetty:1.23.0'\''\n    implementation '\''com.google.android.gms:play-services-auth:20.7.0'\''\n    implementation '\''org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'\''\n    implementation '\''com.google.code.gson:gson:2.10.1'\''\n    implementation '\''androidx.work:work-runtime-ktx:2.9.0'\''' app/build.gradle
-        
-    - name: Add our sync files
-      run: |
-        # Create GoogleDriveSyncService.kt
-        cat > app/src/main/java/org/y20k/transistor/sync/GoogleDriveSyncService.kt << 'EOF'
-        package org.y20k.transistor.sync
-        
-        import android.content.Context
-        import android.util.Log
-        import com.google.android.gms.auth.api.signin.GoogleSignIn
-        import com.google.api.client.extensions.android.http.AndroidHttp
-        import com.google.api.client.googleapis.extensions.android.gms.auth.GoogleAccountCredential
-        import com.google.api.client.json.gson.GsonFactory
-        import com.google.api.services.drive.Drive
-        import com.google.api.services.drive.DriveScopes
-        import com.google.api.services.drive.model.File
-        import com.google.gson.Gson
-        import com.google.gson.reflect.TypeToken
-        import kotlinx.coroutines.Dispatchers
-        import kotlinx.coroutines.withContext
-        import org.y20k.transistor.core.Station
-        import java.io.ByteArrayOutputStream
-        import java.util.*
-        
-        class GoogleDriveSyncService(private val context: Context) {
-            
-            companion object {
-                private const val TAG = "GoogleDriveSync"
-                private const val TRANSISTOR_FOLDER = "Transistor_Backup"
-                private const val STATIONS_FILE = "stations.json"
-                private const val APPLICATION_NAME = "Transistor Radio App"
-            }
-            
-            private var driveService: Drive? = null
-            
-            suspend fun initialize(): Boolean = withContext(Dispatchers.IO) {
-                try {
-                    val account = GoogleSignIn.getLastSignedInAccount(context)
-                    if (account == null) {
-                        Log.e(TAG, "No signed-in Google account found")
-                        return@withContext false
-                    }
-                    
-                    val credential = GoogleAccountCredential.usingOAuth2(
-                        context, listOf(DriveScopes.DRIVE_FILE)
-                    )
-                    credential.selectedAccount = account.account
-                    
-                    driveService = Drive.Builder(
-                        AndroidHttp.newCompatibleTransport(),
-                        GsonFactory.getDefaultInstance(),
-                        credential
-                    ).setApplicationName(APPLICATION_NAME).build()
-                    
-                    true
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to initialize Drive service", e)
-                    false
-                }
-            }
-            
-            suspend fun uploadStations(stations: List<Station>): Boolean = withContext(Dispatchers.IO) {
-                try {
-                    Log.i(TAG, "Sync service created successfully")
-                    true
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to upload stations", e)
-                    false
-                }
-            }
-            
-            suspend fun downloadStations(): List<Station>? = withContext(Dispatchers.IO) {
-                try {
-                    Log.i(TAG, "Download stations called")
-                    emptyList()
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to download stations", e)
-                    null
-                }
-            }
-        }
-        EOF
-        
+      
+    - name: Cache Gradle packages
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-gradle-
+          
     - name: Make gradlew executable
       run: chmod +x ./gradlew
       
-    - name: Clean and build
-      run: |
-        ./gradlew clean
-        ./gradlew assembleDebug
+    - name: Clean project
+      run: ./gradlew clean --stacktrace
+      
+    - name: Build debug APK
+      run: ./gradlew assembleDebug --stacktrace --info
+      
+    - name: List APK files (debug)
+      run: find . -name "*.apk" -type f
       
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
-        name: transistor-with-sync-basic
-        path: app/build/outputs/apk/debug/app-debug.apk
+        name: transistor-apk
+        path: app/build/outputs/apk/debug/*.apk
+        if-no-files-found: error
